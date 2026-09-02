@@ -1,0 +1,11 @@
+{
+  "version": "2026-09-01-balance",
+  "fight_balance": {
+    "equal_or_outnumbered": 4,
+    "opponents_outnumbered": 1
+  },
+  "lane_multipliers": {
+    "normal": 1,
+    "sng": 2
+  }
+}

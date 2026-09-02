@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dofus-pvp-bot"
+version = "0.6.0"
+description = "Bot Discord d’analyse et de validation des captures PvP Dofus Touch"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "discord.py==2.7.1",
+  "onnxruntime>=1.22,<2",
+  "python-dotenv==1.2.1",
+  "rapidocr==3.9.2",
+  "tzdata>=2025.2,<2027",
+]
+
+[project.scripts]
+dofus-pvp-bot = "dofus_pvp_bot.__main__:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15",
+  "ruff>=0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dofus_pvp_bot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["dofus_pvp_bot"]
+
+[[tool.mypy.overrides]]
+module = ["PIL", "PIL.*", "rapidocr", "rapidocr.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
