@@ -48,6 +48,7 @@ class BotSettings:
     scoring_config_path: Path
     max_screenshots: int
     max_image_bytes: int
+    max_review_upload_bytes: int
     max_image_pixels: int
     draft_timeout_seconds: int
     leaderboard_timezone: ZoneInfo
@@ -76,6 +77,9 @@ class BotSettings:
             scoring_config_path=Path(os.getenv("SCORING_CONFIG_PATH", "config/scoring.json")),
             max_screenshots=int(os.getenv("MAX_SCREENSHOTS", "4")),
             max_image_bytes=int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024))),
+            max_review_upload_bytes=int(
+                os.getenv("MAX_REVIEW_UPLOAD_BYTES", str(7 * 1024 * 1024))
+            ),
             max_image_pixels=int(os.getenv("MAX_IMAGE_PIXELS", "20000000")),
             draft_timeout_seconds=int(os.getenv("DRAFT_TIMEOUT_SECONDS", "600")),
             leaderboard_timezone=leaderboard_timezone,
@@ -85,6 +89,10 @@ class BotSettings:
             raise ConfigurationError("MAX_SCREENSHOTS doit être supérieur ou égal à 1.")
         if settings.max_image_bytes < 1:
             raise ConfigurationError("MAX_IMAGE_BYTES doit être supérieur ou égal à 1.")
+        if settings.max_review_upload_bytes < 1:
+            raise ConfigurationError(
+                "MAX_REVIEW_UPLOAD_BYTES doit être supérieur ou égal à 1."
+            )
         if settings.max_image_pixels < 1:
             raise ConfigurationError("MAX_IMAGE_PIXELS doit être supérieur ou égal à 1.")
         if settings.draft_timeout_seconds < 60:

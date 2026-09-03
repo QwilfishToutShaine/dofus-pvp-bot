@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from dofus_pvp_bot.application.submissions import SubmissionError, SubmissionService
@@ -98,7 +99,7 @@ class SubmissionServiceTest(unittest.IsolatedAsyncioTestCase):
             message_id=40,
             submitter_id=4,
             lane=SubmissionLane.NORMAL,
-            detection=DetectionResult(None, detail="Capture indéterminée"),
+            detection=DetectionResult(None, detail="Capture indÃ©terminÃ©e"),
         )
         await self.service.set_participants(draft.id, [4])
         pending = await self.service.mark_pending(draft.id, 101, None)
@@ -149,7 +150,7 @@ class LegacyDatabaseMigrationTest(unittest.IsolatedAsyncioTestCase):
     async def test_first_prototype_database_is_migrated_without_data_loss(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "legacy.sqlite3"
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection:
                 connection.executescript(
                     """
                     CREATE TABLE submissions (
@@ -187,6 +188,7 @@ class LegacyDatabaseMigrationTest(unittest.IsolatedAsyncioTestCase):
                     ) VALUES ('legacy', 1, 2, 3, 4, 'draft', 3, 2, 'sng');
                     """
                 )
+                connection.commit()
 
             repository = SQLiteSubmissionRepository(database_path)
             await repository.initialize()
@@ -204,7 +206,7 @@ class LegacyDatabaseMigrationTest(unittest.IsolatedAsyncioTestCase):
     async def test_version_two_database_keeps_only_unambiguous_classifications(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "version-two.sqlite3"
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection:
                 connection.executescript(
                     """
                     CREATE TABLE submissions (
@@ -250,10 +252,11 @@ class LegacyDatabaseMigrationTest(unittest.IsolatedAsyncioTestCase):
                         base_points, multiplier, total_points, points_explanation
                     ) VALUES (
                         'approved-partial', 1, 2, 12, 4, 'approved', 'fewer_than_four',
-                        'old-rule', 1, 1, 1, '["Ancien barème"]'
+                        'old-rule', 1, 1, 1, '["Ancien barÃ¨me"]'
                     );
                     """
                 )
+                connection.commit()
 
             repository = SQLiteSubmissionRepository(database_path)
             await repository.initialize()

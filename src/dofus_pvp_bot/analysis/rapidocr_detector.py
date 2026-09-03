@@ -76,7 +76,35 @@ class RapidOcrTeamBalanceDetector:
         winners = self._unique_rows(parsed_images, "winners", objective=False)
         losers = self._unique_rows(parsed_images, "losers", objective=False)
         objectives = self._unique_rows(parsed_images, None, objective=True)
-        if len(objectives) != 1:
+        if not objectives:
+            counts_are_plausible = (
+                1 <= len(winners) <= 4 and 0 <= len(losers) <= 4
+            )
+            category_is_certain = counts_are_plausible and len(losers) >= len(winners)
+            confidence = min(
+                [image.confidence for image in parsed_images]
+                + [row.confidence for row in winners + losers]
+                + [0.90]
+            )
+            if category_is_certain and confidence >= MIN_AUTOMATIC_CONFIDENCE:
+                return DetectionResult(
+                    fight_balance=FightBalance.EQUAL_OR_OUTNUMBERED,
+                    confidence=confidence,
+                    detail=(
+                        f"OCR partiel : {len(winners)} allié(s) et au moins "
+                        f"{len(losers)} adversaire(s) visibles. Objectif hors champ ; "
+                        "la catégorie reste certaine."
+                    ),
+                )
+            return DetectionResult(
+                fight_balance=None,
+                detail=(
+                    "Le percepteur ou le prisme est hors champ et les lignes visibles "
+                    "ne suffisent pas à déterminer la catégorie avec certitude. "
+                    "Confirme les effectifs manuellement."
+                ),
+            )
+        if len(objectives) > 1:
             return DetectionResult(
                 fight_balance=None,
                 detail=(

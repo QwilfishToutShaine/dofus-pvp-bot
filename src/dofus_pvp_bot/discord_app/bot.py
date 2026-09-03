@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from io import BytesIO
 from pathlib import Path
 
 import discord
@@ -16,6 +18,7 @@ from dofus_pvp_bot.discord_app.presentation import (
     build_review_embed,
     submission_reference,
 )
+from dofus_pvp_bot.discord_app.review_images import prepare_review_images
 from dofus_pvp_bot.discord_app.views import ReviewView, StartSubmissionView
 from dofus_pvp_bot.domain.leaderboard import MonthPeriod
 from dofus_pvp_bot.domain.models import (
@@ -294,7 +297,31 @@ class DofusPvpBot(commands.Bot):
         if not image_attachments:
             raise RuntimeError("La capture d’origine est introuvable.")
 
-        files = [await attachment.to_file() for attachment in image_attachments]
+        source_images = [
+            ImageEvidence(
+                filename=attachment.filename,
+                content_type=attachment.content_type,
+                content=await attachment.read(),
+            )
+            for attachment in image_attachments
+        ]
+        try:
+            prepared_images = await asyncio.to_thread(
+                prepare_review_images,
+                source_images,
+                max_total_bytes=self.settings.max_review_upload_bytes,
+            )
+        except ValueError as exc:
+            LOGGER.warning(
+                "Copies de validation impossibles pour la soumission %s : %s",
+                submission.id,
+                exc,
+            )
+            prepared_images = []
+        files = [
+            discord.File(BytesIO(image.content), filename=image.filename)
+            for image in prepared_images
+        ]
         points = (
             self.service.calculate(submission)
             if submission.fight_balance is not None
@@ -310,16 +337,36 @@ class DofusPvpBot(commands.Bot):
             submission.id,
             can_approve=points is not None,
         )
-        review_message = await review_channel.send(
-            content=(
-                f"Soumission de <@{submission.submitter_id}> · "
-                f"[ouvrir la capture d’origine]({source_message.jump_url})"
-            ),
-            embed=review_embed,
-            files=files,
-            view=review_view,
-            allowed_mentions=discord.AllowedMentions.none(),
+        review_content = (
+            f"Soumission de <@{submission.submitter_id}> · "
+            f"[ouvrir la capture d’origine]({source_message.jump_url})"
         )
+        try:
+            review_message = await review_channel.send(
+                content=review_content,
+                embed=review_embed,
+                files=files,
+                view=review_view,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException as exc:
+            if exc.code != 40005:
+                raise
+            LOGGER.warning(
+                "Pièces jointes refusées par Discord pour la soumission %s ; "
+                "envoi de la validation avec le lien d’origine.",
+                submission.id,
+            )
+            review_message = await review_channel.send(
+                content=(
+                    f"{review_content}\n"
+                    "⚠️ Les copies des captures étaient trop volumineuses pour Discord. "
+                    "Utilise le lien ci-dessus pour consulter les originaux."
+                ),
+                embed=build_review_embed(submission),
+                view=review_view,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         try:
             await self.service.mark_pending(submission.id, review_message.id, points)
         except Exception:

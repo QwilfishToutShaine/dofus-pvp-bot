@@ -73,6 +73,13 @@ Le jeu initial de dix combats fourni pour la calibration est reconnu intégralem
 photos inclinées et floues. Ce résultat ne constitue pas encore une mesure indépendante de la
 précision réelle ; les corrections humaines restent donc conservées afin d’élargir les tests.
 
+Les captures originales peuvent dépasser la limite de retransmission accordée au compte du bot,
+même si leur auteur a pu les déposer grâce à une limite Discord supérieure. Les copies envoyées au
+salon de validation sont donc automatiquement allégées sous une limite totale sûre. Si Discord les
+refuse malgré tout, la soumission n’est pas bloquée : le message de validation contient un lien vers
+les captures originales. Cette limite totale est configurable avec
+`MAX_REVIEW_UPLOAD_BYTES` (`7340032`, soit 7 Mio, par défaut).
+
 ## Prérequis
 
 - Python 3.11 ou supérieur ;
@@ -132,6 +139,10 @@ LEADERBOARD_TIMEZONE=Europe/Paris
 possèdent pas ce rôle. Les comptes bots sont toujours refusés.
 
 Si `REVIEWER_ROLE_IDS` est vide, seuls les administrateurs du serveur peuvent valider.
+
+`MAX_IMAGE_BYTES` limite séparément chaque image acceptée en entrée. La variable
+`MAX_REVIEW_UPLOAD_BYTES` limite la taille cumulée des copies retransmises dans un seul message au
+salon de validation. Il est recommandé de conserver sa valeur par défaut de `7340032` octets.
 
 Ne publie jamais `.env` et ne copie jamais le token dans le code.
 

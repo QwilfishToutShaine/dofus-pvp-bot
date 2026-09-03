@@ -20,7 +20,7 @@ T = TypeVar("T")
 
 
 class SQLiteSubmissionRepository:
-    """Dépôt SQLite asynchrone, sans connexion partagée entre les threads."""
+    """DÃ©pÃ´t SQLite asynchrone, sans connexion partagÃ©e entre les threads."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -37,18 +37,27 @@ class SQLiteSubmissionRepository:
         return await asyncio.to_thread(self._run_read, operation)
 
     def _run_read(self, operation: Callable[[sqlite3.Connection], T]) -> T:
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             return operation(connection)
+        finally:
+            connection.close()
 
     async def _write(self, operation: Callable[[sqlite3.Connection], T]) -> T:
         async with self._write_lock:
             return await asyncio.to_thread(self._run_write, operation)
 
     def _run_write(self, operation: Callable[[sqlite3.Connection], T]) -> T:
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             result = operation(connection)
             connection.commit()
             return result
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -135,7 +144,7 @@ class SQLiteSubmissionRepository:
 
     @staticmethod
     def _migrate_legacy_schema(connection: sqlite3.Connection) -> None:
-        """Ajoute sans perte les champs introduits par le parcours simplifié."""
+        """Ajoute sans perte les champs introduits par le parcours simplifiÃ©."""
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(submissions)").fetchall()
         }
@@ -272,7 +281,7 @@ class SQLiteSubmissionRepository:
         await self._write(operation)
         existing = await self.get_by_source_message_id(submission.source_message_id)
         if existing is None:
-            raise RuntimeError("La création de la soumission a échoué.")
+            raise RuntimeError("La crÃ©ation de la soumission a Ã©chouÃ©.")
         return existing
 
     async def get(self, submission_id: str) -> Submission | None:

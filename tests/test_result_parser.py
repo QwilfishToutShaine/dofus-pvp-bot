@@ -87,9 +87,34 @@ class ResultParserTest(unittest.TestCase):
         self.assertEqual(parsed.rows, ())
         self.assertIn("victoire", parsed.issue or "")
 
+    def test_accepts_occluded_title_when_table_structure_is_visible(self) -> None:
+        tokens = [
+            item
+            for item in base_tokens()
+            if item.text != "Résultat du combat"
+        ]
+        tokens += row("Alpha", 210)
+        tokens += row("Target Do'Name", 390, objective=True)
+
+        parsed = parse_combat_image(tokens)
+
+        self.assertIsNone(parsed.issue)
+        self.assertEqual(
+            [item.name for item in parsed.rows],
+            ["Alpha", "Target Do'Name"],
+        )
+
     def test_truncated_and_complete_names_match(self) -> None:
         self.assertTrue(names_match("Venissieux-...", "Venissieux-complet"))
         self.assertFalse(names_match("Deus-nova", "Deus-cura"))
+
+    def test_similar_complete_names_do_not_match(self) -> None:
+        self.assertFalse(names_match("Perk-I", "Perk-II"))
+        self.assertFalse(names_match("Player-one", "Player-ane"))
+
+    def test_trailing_ui_marker_is_not_part_of_character_name(self) -> None:
+        self.assertTrue(names_match("Op-VI +", "Op-VI -"))
+        self.assertTrue(names_match("Imatrix +", "Imatrix"))
 
 
 class FakeBackend:
@@ -101,6 +126,75 @@ class FakeBackend:
 
 
 class RapidOcrTeamBalanceDetectorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_classifies_safe_lower_bound_when_objective_is_below_crop(self) -> None:
+        tokens = base_tokens()
+        for index, name in enumerate(("Ally-one", "Ally-two", "Ally-three")):
+            tokens += row(name, 210 + index * 50)
+        for index, name in enumerate(("Enemy-one", "Enemy-two", "Enemy-three")):
+            tokens += row(name, 480 + index * 50)
+        detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
+
+        result = await detector.detect(
+            [ImageEvidence("image.png", "image/png", b"image")]
+        )
+
+        self.assertEqual(result.fight_balance, FightBalance.EQUAL_OR_OUTNUMBERED)
+        self.assertIsNone(result.allies_count)
+        self.assertIsNone(result.opponents_count)
+        self.assertIn("au moins 3 adversaire", result.detail or "")
+
+    async def test_rejects_ambiguous_lower_bound_when_objective_is_below_crop(self) -> None:
+        tokens = base_tokens()
+        for index, name in enumerate(("Ally-one", "Ally-two", "Ally-three", "Ally-four")):
+            tokens += row(name, 200 + index * 45)
+        for index, name in enumerate(("Enemy-one", "Enemy-two", "Enemy-three")):
+            tokens += row(name, 480 + index * 50)
+        detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
+
+        result = await detector.detect(
+            [ImageEvidence("image.png", "image/png", b"image")]
+        )
+
+        self.assertIsNone(result.fight_balance)
+        self.assertIn("ne suffisent pas", result.detail or "")
+
+    async def test_keeps_similar_names_from_the_same_image_distinct(self) -> None:
+        tokens = base_tokens()
+        tokens += row("Perk-I", 210)
+        tokens += row("Perk-II", 270)
+        tokens += row("Target Do'Name", 390, objective=True)
+        tokens += row("Enemy", 480)
+        detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
+
+        result = await detector.detect(
+            [ImageEvidence("image.png", "image/png", b"image")]
+        )
+
+        self.assertEqual(result.allies_count, 2)
+        self.assertEqual(result.opponents_count, 1)
+
+    async def test_keeps_similar_names_from_different_images_distinct(self) -> None:
+        first = base_tokens()
+        first += row("Perk-I", 210)
+        first += row("Target Do'Name", 390, objective=True)
+        second = base_tokens()
+        second += row("Perk-II", 270)
+        second += row("Target Do'Name", 390, objective=True)
+        second += row("Enemy", 480)
+        detector = RapidOcrTeamBalanceDetector(
+            FakeBackend({b"first": first, b"second": second})
+        )
+
+        result = await detector.detect(
+            [
+                ImageEvidence("first.png", "image/png", b"first"),
+                ImageEvidence("second.png", "image/png", b"second"),
+            ]
+        )
+
+        self.assertEqual(result.allies_count, 2)
+        self.assertEqual(result.opponents_count, 1)
+
     async def test_aggregates_scrolled_images_without_counting_duplicates(self) -> None:
         first = base_tokens()
         for index, name in enumerate(("Alpha", "Beta", "Gamma", "Delta")):
@@ -127,8 +221,13 @@ class RapidOcrTeamBalanceDetectorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.allies_count, 4)
         self.assertEqual(result.opponents_count, 4)
 
-    async def test_returns_undetermined_without_exactly_one_objective(self) -> None:
-        tokens = base_tokens() + row("Alpha", 210) + row("Enemy", 480)
+    async def test_returns_undetermined_without_objective_when_counts_are_ambiguous(self) -> None:
+        tokens = (
+            base_tokens()
+            + row("Alpha", 210)
+            + row("Beta", 270)
+            + row("Enemy", 480)
+        )
         detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
 
         result = await detector.detect(
@@ -136,7 +235,7 @@ class RapidOcrTeamBalanceDetectorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(result.fight_balance)
-        self.assertIn("exactement un", result.detail or "")
+        self.assertIn("ne suffisent pas", result.detail or "")
 
     async def test_returns_undetermined_for_different_fight_durations(self) -> None:
         first = base_tokens() + row("Alpha", 210) + row("Target Do'Name", 390)

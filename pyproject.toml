@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dofus-pvp-bot"
-version = "0.6.0"
+version = "0.7.0"
 description = "Bot Discord d’analyse et de validation des captures PvP Dofus Touch"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "discord.py==2.7.1",
   "onnxruntime>=1.22,<2",
+  "pillow>=11,<13",
   "python-dotenv==1.2.1",
   "rapidocr==3.9.2",
   "tzdata>=2025.2,<2027",

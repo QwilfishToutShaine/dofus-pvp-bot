@@ -118,7 +118,7 @@ def parse_combat_image(tokens: list[OcrToken]) -> ParsedCombatImage:
     level_header = _best_token(tokens, "niv", minimum_similarity=0.72)
     winners_header = _best_token(tokens, "gagnants")
     losers_header = _best_token(tokens, "perdants")
-    if title is None or victory is None:
+    if victory is None:
         return ParsedCombatImage((), 0.0, issue="La capture ne montre pas une victoire.")
     if name_header is None or level_header is None:
         return ParsedCombatImage((), 0.0, issue="Les colonnes du résultat sont illisibles.")
@@ -200,7 +200,9 @@ def parse_combat_image(tokens: list[OcrToken]) -> ParsedCombatImage:
 
     if not rows:
         return ParsedCombatImage((), 0.0, issue="Aucune ligne de combattant lisible.")
-    structural_tokens = [title, victory, name_header, level_header]
+    structural_tokens = [victory, name_header, level_header]
+    if title is not None:
+        structural_tokens.append(title)
     if winners_header is not None:
         structural_tokens.append(winners_header)
     if losers_header is not None:
@@ -218,6 +220,10 @@ def parse_combat_image(tokens: list[OcrToken]) -> ParsedCombatImage:
 
 def canonical_name(name: str) -> str:
     normalised = _normalise(name)
+    # Les icônes vertes situées après certains personnages sont parfois lues
+    # comme un signe ``+`` ou ``-`` isolé. Ce marqueur d'interface ne fait pas
+    # partie du nom et peut varier entre deux captures du même résultat.
+    normalised = re.sub(r"\s+[+-]\s*$", "", normalised)
     normalised = re.sub(r"[^a-z0-9'….-]+$", "", normalised)
     return normalised.strip(" .")
 
