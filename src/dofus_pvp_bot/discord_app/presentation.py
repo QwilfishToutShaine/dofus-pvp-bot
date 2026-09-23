@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import discord
 
 from dofus_pvp_bot.application.submissions import SubmissionService
@@ -175,7 +177,10 @@ def build_review_embed(submission: Submission, *, final: bool = False) -> discor
     return embed
 
 
-def build_leaderboard_embed(leaderboard: MonthlyLeaderboard) -> discord.Embed:
+def build_leaderboard_embed(
+    leaderboard: MonthlyLeaderboard,
+    display_names: Mapping[int, str],
+) -> discord.Embed:
     if leaderboard.finalized:
         colour = discord.Colour.gold()
         status = "🔒 Classement définitif"
@@ -194,8 +199,13 @@ def build_leaderboard_embed(leaderboard: MonthlyLeaderboard) -> discord.Embed:
     for entry in leaderboard.entries:
         prefix = medals.get(entry.rank, f"**{entry.rank}.**")
         combat_label = "combat" if entry.submission_count == 1 else "combats"
+        display_name = display_names.get(
+            entry.user_id,
+            f"Utilisateur inconnu · ID {entry.user_id}",
+        )
+        display_name = discord.utils.escape_markdown(display_name)
         lines.append(
-            f"{prefix} <@{entry.user_id}> — **{entry.total_points} pts** "
+            f"{prefix} **{display_name}** — **{entry.total_points} pts** "
             f"· {entry.submission_count} {combat_label}"
         )
 

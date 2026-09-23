@@ -130,7 +130,11 @@ def parse_combat_image(tokens: list[OcrToken]) -> ParsedCombatImage:
         )
 
     column_gap = max(level_header.left - name_header.left, level_header.width * 2)
-    name_left_bound = name_header.left - 1.4 * column_gap
+    # Les objectifs sont décalés vers la gauche car leur ligne n'a pas de
+    # portrait, mais ils restent proches de la colonne des noms. Une marge trop
+    # large peut associer un nombre de la carte à une ligne de chat située sous
+    # la fenêtre et fabriquer ainsi un faux combattant.
+    name_left_bound = name_header.left - 0.9 * column_gap
     name_right_bound = level_header.left - 2
     objective_cutoff = name_header.left - 0.4 * column_gap
     level_tolerance = max(level_header.width * 2, column_gap * 0.45)

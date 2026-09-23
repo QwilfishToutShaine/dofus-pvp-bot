@@ -116,6 +116,26 @@ class ResultParserTest(unittest.TestCase):
         self.assertTrue(names_match("Op-VI +", "Op-VI -"))
         self.assertTrue(names_match("Imatrix +", "Imatrix"))
 
+    def test_ignores_chat_text_paired_with_a_map_number_below_table(self) -> None:
+        tokens = base_tokens()
+        tokens += row("Alpha", 210)
+        tokens += row("Target Do'Name", 390, objective=True)
+        tokens += row("Enemy", 480)
+        # Sous la fenêtre de résultat, l'OCR peut aligner un fragment du chat
+        # avec un nombre affiché sur la carte et les prendre pour une ligne.
+        tokens += [token("survécu!", 80, 650), token("29", 505, 650)]
+
+        parsed = parse_combat_image(tokens)
+
+        self.assertEqual(
+            [item.name for item in parsed.rows],
+            ["Alpha", "Target Do'Name", "Enemy"],
+        )
+        self.assertEqual(
+            [item.name for item in parsed.rows if item.is_objective],
+            ["Target Do'Name"],
+        )
+
 
 class FakeBackend:
     def __init__(self, results: dict[bytes, list[OcrToken]]) -> None:

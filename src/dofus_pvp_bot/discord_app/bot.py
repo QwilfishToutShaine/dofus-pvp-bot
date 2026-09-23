@@ -127,6 +127,10 @@ class DofusPvpBot(commands.Bot):
                 "Cette commande doit être utilisée sur le serveur.", ephemeral=True
             )
             return
+        # La résolution des surnoms peut nécessiter plusieurs appels à l'API
+        # Discord. On acquitte la commande immédiatement pour ne pas dépasser
+        # le délai de réponse des interactions.
+        await interaction.response.defer(ephemeral=True)
         try:
             period = (
                 MonthPeriod.parse(month_value)
@@ -135,13 +139,59 @@ class DofusPvpBot(commands.Bot):
             )
             leaderboard = await self.leaderboard_service.get(interaction.guild_id, period)
         except ValueError as exc:
-            await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
+            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
             return
-        await interaction.response.send_message(
-            embed=build_leaderboard_embed(leaderboard),
+        guild = interaction.guild or self.get_guild(interaction.guild_id)
+        if guild is None:
+            await interaction.followup.send(
+                "❌ Impossible d’identifier le serveur Discord.", ephemeral=True
+            )
+            return
+        display_names = {
+            entry.user_id: await self._resolve_leaderboard_display_name(
+                guild,
+                entry.user_id,
+            )
+            for entry in leaderboard.entries
+        }
+        await interaction.followup.send(
+            embed=build_leaderboard_embed(leaderboard, display_names),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    async def _resolve_leaderboard_display_name(
+        self,
+        guild: discord.Guild,
+        user_id: int,
+    ) -> str:
+        member = guild.get_member(user_id)
+        if member is not None:
+            return member.display_name
+
+        try:
+            member = await guild.fetch_member(user_id)
+        except discord.NotFound:
+            pass
+        except discord.HTTPException as exc:
+            LOGGER.warning(
+                "Impossible de récupérer le membre %s du serveur %s : %s",
+                user_id,
+                guild.id,
+                exc,
+            )
+        else:
+            return member.display_name
+
+        user = self.get_user(user_id)
+        if user is not None:
+            return user.display_name
+        try:
+            user = await self.fetch_user(user_id)
+        except discord.HTTPException as exc:
+            LOGGER.warning("Impossible de récupérer l’utilisateur %s : %s", user_id, exc)
+            return f"Utilisateur inconnu · ID {user_id}"
+        return user.display_name
 
     def _month_choices(self, current: str) -> list[app_commands.Choice[str]]:
         period = MonthPeriod.current(self.settings.leaderboard_timezone)
