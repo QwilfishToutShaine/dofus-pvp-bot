@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from dofus_pvp_bot.domain.models import (
+    CombatType,
     DetectionMethod,
     FightBalance,
     PointsBreakdown,
@@ -77,6 +78,10 @@ class SQLiteSubmissionRepository:
                     prompt_message_id INTEGER,
                     review_message_id INTEGER,
                     fight_balance TEXT,
+                    combat_type TEXT,
+                    detected_combat_type TEXT,
+                    combat_type_corrected INTEGER NOT NULL DEFAULT 0,
+                    combat_type_required INTEGER NOT NULL DEFAULT 0,
                     allies_count INTEGER,
                     opponents_count INTEGER,
                     detected_allies_count INTEGER,
@@ -151,6 +156,10 @@ class SQLiteSubmissionRepository:
         additions = {
             "lane": "TEXT NOT NULL DEFAULT 'normal'",
             "fight_balance": "TEXT",
+            "combat_type": "TEXT",
+            "detected_combat_type": "TEXT",
+            "combat_type_corrected": "INTEGER NOT NULL DEFAULT 0",
+            "combat_type_required": "INTEGER NOT NULL DEFAULT 0",
             "allies_count": "INTEGER",
             "opponents_count": "INTEGER",
             "detected_allies_count": "INTEGER",
@@ -254,10 +263,12 @@ class SQLiteSubmissionRepository:
                 INSERT OR IGNORE INTO submissions (
                     id, guild_id, source_channel_id, source_message_id,
                     submitter_id, lane, status, fight_balance,
+                    combat_type, detected_combat_type, combat_type_corrected,
+                    combat_type_required,
                     allies_count, opponents_count,
                     detected_allies_count, detected_opponents_count,
                     detection_method, detection_confidence, detection_detail
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     submission.id,
@@ -268,6 +279,13 @@ class SQLiteSubmissionRepository:
                     submission.lane.value,
                     submission.status.value,
                     submission.fight_balance.value if submission.fight_balance else None,
+                    submission.combat_type.value if submission.combat_type else None,
+                    (
+                        submission.detected_combat_type.value
+                        if submission.detected_combat_type else None
+                    ),
+                    int(submission.combat_type_corrected),
+                    int(submission.combat_type_required),
                     submission.allies_count,
                     submission.opponents_count,
                     submission.detected_allies_count,
@@ -579,6 +597,13 @@ class SQLiteSubmissionRepository:
             fight_balance=(
                 FightBalance(row["fight_balance"]) if row["fight_balance"] else None
             ),
+            combat_type=CombatType(row["combat_type"]) if row["combat_type"] else None,
+            detected_combat_type=(
+                CombatType(row["detected_combat_type"])
+                if row["detected_combat_type"] else None
+            ),
+            combat_type_corrected=bool(row["combat_type_corrected"]),
+            combat_type_required=bool(row["combat_type_required"]),
             allies_count=row["allies_count"],
             opponents_count=row["opponents_count"],
             detected_allies_count=row["detected_allies_count"],
@@ -604,6 +629,8 @@ class SQLiteSubmissionRepository:
                 UPDATE submissions SET
                     lane = ?, status = ?, prompt_message_id = ?, review_message_id = ?,
                     fight_balance = ?, allies_count = ?, opponents_count = ?,
+                    combat_type = ?, detected_combat_type = ?, combat_type_corrected = ?,
+                    combat_type_required = ?,
                     detected_allies_count = ?, detected_opponents_count = ?, detection_method = ?,
                     detection_confidence = ?, detection_detail = ?, note = ?,
                     rule_version = ?, base_points = ?,
@@ -620,6 +647,13 @@ class SQLiteSubmissionRepository:
                     submission.fight_balance.value if submission.fight_balance else None,
                     submission.allies_count,
                     submission.opponents_count,
+                    submission.combat_type.value if submission.combat_type else None,
+                    (
+                        submission.detected_combat_type.value
+                        if submission.detected_combat_type else None
+                    ),
+                    int(submission.combat_type_corrected),
+                    int(submission.combat_type_required),
                     submission.detected_allies_count,
                     submission.detected_opponents_count,
                     submission.detection_method.value if submission.detection_method else None,

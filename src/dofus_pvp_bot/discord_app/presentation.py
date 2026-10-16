@@ -59,6 +59,15 @@ def build_draft_embed(
         ),
         inline=False,
     )
+    embed.add_field(
+        name="Sens du combat",
+        value=(
+            f"{submission.combat_type.label} (détectée sur la position du percepteur/prisme)"
+            if submission.combat_type is not None
+            else "⏳ Indéterminé : à préciser par le staff avant validation"
+        ),
+        inline=False,
+    )
 
     members = " ".join(f"<@{user_id}>" for user_id in submission.participant_ids)
     member_text = f"{len(submission.participant_ids)}/4 sélectionné(s)"
@@ -120,6 +129,27 @@ def build_review_embed(submission: Submission, *, final: bool = False) -> discor
         value=_detection_text(submission),
         inline=False,
     )
+    combat_type_text = (
+        submission.combat_type.label
+        if submission.combat_type is not None
+        else (
+            "⏳ Indéterminé : à préciser par le staff avant validation"
+            if submission.combat_type_required
+            else "Non renseigné (ancienne soumission)"
+        )
+    )
+    if submission.combat_type_corrected:
+        combat_type_text += " · corrigé par le staff"
+    embed.add_field(name="Sens du combat", value=combat_type_text, inline=False)
+    if (
+        submission.combat_type_corrected
+        and submission.detected_combat_type is not None
+    ):
+        embed.add_field(
+            name="Sens OCR initial",
+            value=submission.detected_combat_type.label,
+            inline=False,
+        )
     if (
         submission.detection_method is not None
         and submission.detection_method.value == "manual"

@@ -6,15 +6,16 @@ soumissions de points vérifiées par le staff.
 ## Parcours simplifié
 
 1. Un membre dépose une ou plusieurs images dans le salon normal ou le salon SNG.
-2. Le bot lance localement l’analyse OCR des effectifs alliés et adverses.
+2. Le bot lance localement l’analyse OCR des effectifs et du sens du combat : percepteur ou
+   prisme chez les perdants = attaque ; chez les gagnants = défense.
 3. Le bot répond automatiquement avec **Attribuer les points**.
 4. L’auteur sélectionne uniquement entre un et quatre membres Discord bénéficiaires.
 5. Le bot calcule les points quand l’OCR a abouti et republie la preuve dans le salon de
    vérification. Une analyse indéterminée peut également être envoyée.
-6. Le staff valide directement ou saisit les effectifs exacts avec **Corriger les effectifs** ;
-   les points sont alors recalculés avant validation.
-7. Les effectifs détectés par l’OCR et ceux finalement retenus sont conservés séparément dans
-   SQLite, avec le barème et les statuts.
+6. Le staff valide directement ou corrige les effectifs et/ou le sens du combat. Pour une nouvelle
+   soumission, il doit préciser attaque ou défense si l’OCR n’a pas pu le faire.
+7. Les effectifs et le sens détectés par l’OCR et ceux finalement retenus sont conservés
+   séparément dans SQLite, avec le barème et les statuts.
 8. Chaque membre peut consulter le classement mensuel avec `/classement`.
 
 Le clic sur **Attribuer les points** reste nécessaire : Discord ne permet pas d’ouvrir
@@ -63,6 +64,11 @@ fait appel à aucune API OCR payante. Il repère l’écran de victoire, les sec
 `Perdants`, associe les noms à leur niveau, puis exclut le percepteur ou le prisme. Plusieurs images
 jointes au même message peuvent représenter différentes positions de défilement du même résultat :
 les combattants sont alors regroupés sans compter deux fois les lignes communes.
+
+La position du percepteur ou du prisme détermine le sens du combat. S’il est chez les perdants,
+c’est une **attaque** ; chez les gagnants, c’est une **défense**. Si le sens est illisible ou si les
+captures se contredisent, le staff utilise **Corriger attaque/défense**. Les soumissions créées
+avant cette mise à jour gardent un sens non renseigné : la migration ne l’invente pas.
 
 Un seul combat est autorisé par message. Si une capture est illisible, si les durées ne concordent
 pas, si l’objectif n’est pas identifié explicitement ou si les effectifs sortent de l’intervalle

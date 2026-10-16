@@ -7,7 +7,7 @@ import discord
 from dofus_pvp_bot.application.submissions import SubmissionError, SubmissionService
 from dofus_pvp_bot.config import BotSettings
 from dofus_pvp_bot.discord_app.presentation import build_draft_embed, build_review_embed
-from dofus_pvp_bot.domain.models import Submission, SubmissionStatus
+from dofus_pvp_bot.domain.models import CombatType, Submission, SubmissionStatus
 
 if TYPE_CHECKING:
     from dofus_pvp_bot.discord_app.bot import DofusPvpBot
@@ -271,6 +271,14 @@ class ReviewView(discord.ui.View):
         correct.callback = self.correct_counts  # type: ignore[method-assign]
         self.add_item(correct)
 
+        correct_type: discord.ui.Button[ReviewView] = discord.ui.Button(
+            label="Corriger attaque/défense",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"submission:correct-type:{submission_id}",
+        )
+        correct_type.callback = self.correct_combat_type  # type: ignore[method-assign]
+        self.add_item(correct_type)
+
         reject: discord.ui.Button[ReviewView] = discord.ui.Button(
             label="Refuser",
             emoji="❌",
@@ -316,6 +324,18 @@ class ReviewView(discord.ui.View):
             return
         await interaction.response.send_modal(
             StaffCountsModal(self, interaction.message, submission)
+        )
+
+    async def correct_combat_type(self, interaction: discord.Interaction) -> None:
+        if interaction.message is None:
+            await _ephemeral_error(interaction, "Message de validation introuvable.")
+            return
+        submission = await self.service.require(self.submission_id)
+        if submission.status is not SubmissionStatus.PENDING_REVIEW:
+            await _ephemeral_error(interaction, "Cette soumission n’est plus modifiable.")
+            return
+        await interaction.response.send_modal(
+            StaffCombatTypeModal(self, interaction.message, submission)
         )
 
     async def reject(self, interaction: discord.Interaction) -> None:
@@ -376,9 +396,58 @@ class StaffCountsModal(discord.ui.Modal):
         except SubmissionError as exc:
             await _ephemeral_error(interaction, str(exc))
             return
-        self.review_view.approve_button.disabled = False
+        self.review_view.approve_button.disabled = not self.review_view.service.can_approve(
+            submission
+        )
         await interaction.response.send_message(
             f"✅ Effectifs retenus : {allies_count}v{opponents_count}. Points recalculés.",
+            ephemeral=True,
+        )
+        embed = build_review_embed(submission)
+        if self.review_message.attachments:
+            embed.set_image(url=self.review_message.attachments[0].url)
+        await self.review_message.edit(embed=embed, view=self.review_view)
+
+
+class StaffCombatTypeModal(discord.ui.Modal):
+    def __init__(
+        self,
+        review_view: ReviewView,
+        review_message: discord.Message,
+        submission: Submission,
+    ) -> None:
+        super().__init__(title="Corriger le sens du combat", timeout=300)
+        self.review_view = review_view
+        self.review_message = review_message
+        self.combat_type: discord.ui.TextInput[StaffCombatTypeModal] = discord.ui.TextInput(
+            label="Attaque ou défense",
+            placeholder="attaque ou défense",
+            default=submission.combat_type.label if submission.combat_type else None,
+            required=True,
+            max_length=7,
+        )
+        self.add_item(self.combat_type)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        value = self.combat_type.value.strip().casefold()
+        if value not in {"attaque", "défense", "defense"}:
+            await _ephemeral_error(interaction, "Saisis « attaque » ou « défense ».")
+            return
+        combat_type = (
+            CombatType.ATTACK if value == "attaque" else CombatType.DEFENSE
+        )
+        try:
+            submission = await self.review_view.service.set_review_combat_type(
+                self.review_view.submission_id, combat_type
+            )
+        except SubmissionError as exc:
+            await _ephemeral_error(interaction, str(exc))
+            return
+        self.review_view.approve_button.disabled = not self.review_view.service.can_approve(
+            submission
+        )
+        await interaction.response.send_message(
+            f"✅ Sens du combat : {combat_type.label}. Points inchangés.",
             ephemeral=True,
         )
         embed = build_review_embed(submission)

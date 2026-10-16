@@ -92,10 +92,7 @@ class DofusPvpBot(commands.Bot):
                         self.service,
                         self.settings,
                         submission.id,
-                        can_approve=(
-                            submission.fight_balance is not None
-                            and submission.points is not None
-                        ),
+                        can_approve=self.service.can_approve(submission),
                     ),
                     message_id=submission.review_message_id,
                 )
@@ -307,6 +304,10 @@ class DofusPvpBot(commands.Bot):
             analysis_text = (
                 f"Résultat détecté : {counts}**{submission.fight_balance.label}**."
             )
+        if submission.combat_type is not None:
+            analysis_text += f" Sens du combat : **{submission.combat_type.label}**."
+        else:
+            analysis_text += " Sens du combat à vérifier par le staff."
         prompt_embed = discord.Embed(
             title="Nouvelle soumission détectée",
             description=(
@@ -385,7 +386,10 @@ class DofusPvpBot(commands.Bot):
             self.service,
             self.settings,
             submission.id,
-            can_approve=points is not None,
+            can_approve=(
+                points is not None
+                and (not submission.combat_type_required or submission.combat_type is not None)
+            ),
         )
         review_content = (
             f"Soumission de <@{submission.submitter_id}> · "

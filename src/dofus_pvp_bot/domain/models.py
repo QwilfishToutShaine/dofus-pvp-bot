@@ -13,6 +13,23 @@ class SubmissionLane(StrEnum):
         return {self.NORMAL: "Salon normal", self.SNG: "Salon SNG"}[self]
 
 
+class CombatType(StrEnum):
+    ATTACK = "attack"
+    DEFENSE = "defense"
+
+    @property
+    def label(self) -> str:
+        return {self.ATTACK: "Attaque", self.DEFENSE: "Défense"}[self]
+
+    @classmethod
+    def from_objective_side(cls, side: str) -> CombatType:
+        if side == "losers":
+            return cls.ATTACK
+        if side == "winners":
+            return cls.DEFENSE
+        raise ValueError("Le camp de l’objectif doit être gagnants ou perdants.")
+
+
 class FightBalance(StrEnum):
     EQUAL_OR_OUTNUMBERED = "equal_or_outnumbered"
     OPPONENTS_OUTNUMBERED = "opponents_outnumbered"
@@ -62,6 +79,7 @@ class DetectionResult:
     opponents_count: int | None = None
     confidence: float | None = None
     detail: str | None = None
+    combat_type: CombatType | None = None
 
     def __post_init__(self) -> None:
         if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
@@ -98,6 +116,10 @@ class Submission:
     prompt_message_id: int | None = None
     review_message_id: int | None = None
     fight_balance: FightBalance | None = None
+    combat_type: CombatType | None = None
+    detected_combat_type: CombatType | None = None
+    combat_type_corrected: bool = False
+    combat_type_required: bool = False
     allies_count: int | None = None
     opponents_count: int | None = None
     detected_allies_count: int | None = None

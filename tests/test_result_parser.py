@@ -6,7 +6,7 @@ from dofus_pvp_bot.analysis.ocr import OcrToken
 from dofus_pvp_bot.analysis.rapidocr_detector import RapidOcrTeamBalanceDetector
 from dofus_pvp_bot.analysis.result_parser import names_match, parse_combat_image
 from dofus_pvp_bot.analysis.team_balance import ImageEvidence
-from dofus_pvp_bot.domain.models import FightBalance
+from dofus_pvp_bot.domain.models import CombatType, FightBalance
 
 
 def token(text: str, x: float, y: float, *, confidence: float = 0.98) -> OcrToken:
@@ -146,6 +146,46 @@ class FakeBackend:
 
 
 class RapidOcrTeamBalanceDetectorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_objective_among_losers_means_attack(self) -> None:
+        tokens = base_tokens()
+        tokens += row("Ally", 210)
+        tokens += row("Enemy", 480)
+        tokens += row("Prisme d'alliance", 540, objective=True)
+        detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
+
+        result = await detector.detect([ImageEvidence("image.png", "image/png", b"image")])
+
+        self.assertEqual(result.combat_type, CombatType.ATTACK)
+        self.assertEqual((result.allies_count, result.opponents_count), (1, 1))
+
+    async def test_objective_among_winners_means_defense(self) -> None:
+        tokens = base_tokens()
+        tokens += row("Ally", 210)
+        tokens += row("Prisme d'alliance", 270, objective=True)
+        tokens += row("Enemy", 480)
+        detector = RapidOcrTeamBalanceDetector(FakeBackend({b"image": tokens}))
+
+        result = await detector.detect([ImageEvidence("image.png", "image/png", b"image")])
+
+        self.assertEqual(result.combat_type, CombatType.DEFENSE)
+        self.assertEqual((result.allies_count, result.opponents_count), (1, 1))
+
+    async def test_conflicting_objective_sides_require_staff_review(self) -> None:
+        first = base_tokens() + row("Ally", 210) + row("Prisme d'alliance", 270, objective=True)
+        second = base_tokens() + row("Ally", 210) + row("Prisme d'alliance", 540, objective=True)
+        detector = RapidOcrTeamBalanceDetector(
+            FakeBackend({b"first": first, b"second": second})
+        )
+
+        result = await detector.detect([
+            ImageEvidence("first.png", "image/png", b"first"),
+            ImageEvidence("second.png", "image/png", b"second"),
+        ])
+
+        self.assertIsNone(result.combat_type)
+        self.assertIsNone(result.fight_balance)
+        self.assertIn("camps différents", result.detail or "")
+
     async def test_classifies_safe_lower_bound_when_objective_is_below_crop(self) -> None:
         tokens = base_tokens()
         for index, name in enumerate(("Ally-one", "Ally-two", "Ally-three")):
@@ -161,6 +201,7 @@ class RapidOcrTeamBalanceDetectorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.fight_balance, FightBalance.EQUAL_OR_OUTNUMBERED)
         self.assertIsNone(result.allies_count)
         self.assertIsNone(result.opponents_count)
+        self.assertIsNone(result.combat_type)
         self.assertIn("au moins 3 adversaire", result.detail or "")
 
     async def test_rejects_ambiguous_lower_bound_when_objective_is_below_crop(self) -> None:

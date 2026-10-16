@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dofus_pvp_bot.application.submissions import SubmissionError, SubmissionService
 from dofus_pvp_bot.domain.models import (
+    CombatType,
     DetectionMethod,
     DetectionResult,
     FightBalance,
@@ -46,12 +47,15 @@ class SubmissionServiceTest(unittest.IsolatedAsyncioTestCase):
                 allies_count=1,
                 opponents_count=2,
                 confidence=0.91,
+                combat_type=CombatType.ATTACK,
             ),
         )
         await self.service.set_participants(draft.id, [4, 5])
 
         ready = await self.service.require(draft.id)
         self.assertEqual(ready.detection_method, DetectionMethod.AUTOMATIC)
+        self.assertEqual(ready.combat_type, CombatType.ATTACK)
+        self.assertEqual(ready.detected_combat_type, CombatType.ATTACK)
         self.assertEqual((ready.allies_count, ready.opponents_count), (1, 2))
         points = self.service.calculate(ready)
         self.assertEqual(points.total_points, 8)
@@ -62,6 +66,32 @@ class SubmissionServiceTest(unittest.IsolatedAsyncioTestCase):
         approved = await self.service.approve(draft.id)
         self.assertEqual(approved.status, SubmissionStatus.APPROVED)
         self.assertIsNotNone(approved.approved_at)
+
+    async def test_staff_can_correct_combat_type_without_changing_points(self) -> None:
+        draft = await self.service.create_draft(
+            guild_id=1,
+            channel_id=2,
+            message_id=333,
+            submitter_id=4,
+            lane=SubmissionLane.NORMAL,
+            detection=DetectionResult(
+                FightBalance.EQUAL_OR_OUTNUMBERED,
+                allies_count=1,
+                opponents_count=1,
+                confidence=0.94,
+                combat_type=CombatType.ATTACK,
+            ),
+        )
+        await self.service.set_participants(draft.id, [4])
+        ready = await self.service.require(draft.id)
+        await self.service.mark_pending(draft.id, 100, self.service.calculate(ready))
+
+        corrected = await self.service.set_review_combat_type(draft.id, CombatType.DEFENSE)
+        self.assertEqual(corrected.combat_type, CombatType.DEFENSE)
+        self.assertEqual(corrected.detected_combat_type, CombatType.ATTACK)
+        self.assertTrue(corrected.combat_type_corrected)
+        self.assertEqual(corrected.points, ready.points or self.service.calculate(ready))
+        self.assertEqual((await self.service.approve(draft.id)).combat_type, CombatType.DEFENSE)
 
     async def test_staff_correction_preserves_original_detection(self) -> None:
         draft = await self.service.create_draft(
@@ -111,6 +141,11 @@ class SubmissionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(corrected.fight_balance, FightBalance.EQUAL_OR_OUTNUMBERED)
         assert corrected.points is not None
         self.assertEqual(corrected.points.total_points, 4)
+        self.assertFalse(self.service.can_approve(corrected))
+        with self.assertRaisesRegex(SubmissionError, "attaque ou défense"):
+            await self.service.approve(draft.id)
+        corrected = await self.service.set_review_combat_type(draft.id, CombatType.DEFENSE)
+        self.assertTrue(self.service.can_approve(corrected))
         approved = await self.service.approve(draft.id)
         self.assertEqual(approved.status, SubmissionStatus.APPROVED)
 
@@ -202,6 +237,8 @@ class LegacyDatabaseMigrationTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(migrated.detected_allies_count, 3)
             self.assertEqual(migrated.detected_opponents_count, 2)
             self.assertEqual(migrated.detection_method, DetectionMethod.MANUAL)
+            self.assertIsNone(migrated.combat_type)
+            self.assertFalse(migrated.combat_type_required)
 
     async def test_version_two_database_keeps_only_unambiguous_classifications(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

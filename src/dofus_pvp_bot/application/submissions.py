@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from dofus_pvp_bot.domain.models import (
+    CombatType,
     DetectionMethod,
     DetectionResult,
     FightBalance,
@@ -46,9 +47,12 @@ class SubmissionService:
             source_message_id=message_id,
             submitter_id=submitter_id,
             lane=lane,
+            combat_type_required=True,
         )
         if detection is not None:
             draft.fight_balance = detection.fight_balance
+            draft.combat_type = detection.combat_type
+            draft.detected_combat_type = detection.combat_type
             draft.allies_count = detection.allies_count
             draft.opponents_count = detection.opponents_count
             draft.detected_allies_count = detection.allies_count
@@ -102,6 +106,19 @@ class SubmissionService:
         await self.repository.save(submission)
         return submission
 
+    async def set_review_combat_type(
+        self,
+        submission_id: str,
+        combat_type: CombatType,
+    ) -> Submission:
+        submission = await self.require(submission_id)
+        if submission.status is not SubmissionStatus.PENDING_REVIEW:
+            raise SubmissionError("Seule une soumission en attente peut être corrigée.")
+        submission.combat_type = combat_type
+        submission.combat_type_corrected = True
+        await self.repository.save(submission)
+        return submission
+
     async def set_participants(self, submission_id: str, participant_ids: list[int]) -> Submission:
         submission = await self.require(submission_id)
         self._ensure_draft(submission)
@@ -129,6 +146,14 @@ class SubmissionService:
             raise SubmissionError("Sélectionne au moins un participant Discord.")
         return self.scoring.calculate(submission.fight_balance, submission.lane)
 
+    @staticmethod
+    def can_approve(submission: Submission) -> bool:
+        return (
+            submission.fight_balance is not None
+            and submission.points is not None
+            and (not submission.combat_type_required or submission.combat_type is not None)
+        )
+
     async def mark_pending(
         self,
         submission_id: str,
@@ -150,6 +175,8 @@ class SubmissionService:
             raise SubmissionError("Seule une soumission en attente peut être validée.")
         if submission.fight_balance is None or submission.points is None:
             raise SubmissionError("Le staff doit d’abord renseigner les effectifs du combat.")
+        if submission.combat_type_required and submission.combat_type is None:
+            raise SubmissionError("Le staff doit d’abord préciser attaque ou défense.")
         submission.status = SubmissionStatus.APPROVED
         submission.approved_at = _utc_now()
         await self.repository.save(submission)

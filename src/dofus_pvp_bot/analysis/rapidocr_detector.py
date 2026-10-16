@@ -12,7 +12,7 @@ from dofus_pvp_bot.analysis.result_parser import (
     parse_combat_image,
 )
 from dofus_pvp_bot.analysis.team_balance import ImageEvidence
-from dofus_pvp_bot.domain.models import DetectionResult, FightBalance
+from dofus_pvp_bot.domain.models import CombatType, DetectionResult, FightBalance
 
 LOGGER = logging.getLogger(__name__)
 MIN_AUTOMATIC_CONFIDENCE = 0.82
@@ -76,6 +76,20 @@ class RapidOcrTeamBalanceDetector:
         winners = self._unique_rows(parsed_images, "winners", objective=False)
         losers = self._unique_rows(parsed_images, "losers", objective=False)
         objectives = self._unique_rows(parsed_images, None, objective=True)
+        objective_sides = {
+            row.side
+            for parsed in parsed_images
+            for row in parsed.rows
+            if row.is_objective
+        }
+        if len(objective_sides) > 1:
+            return DetectionResult(
+                fight_balance=None,
+                detail=(
+                    "Les captures placent l’objectif dans des camps différents. "
+                    "Le staff doit vérifier le combat."
+                ),
+            )
         if not objectives:
             counts_are_plausible = (
                 1 <= len(winners) <= 4 and 0 <= len(losers) <= 4
@@ -144,13 +158,17 @@ class RapidOcrTeamBalanceDetector:
                 ),
             )
         balance = FightBalance.from_counts(len(winners), len(losers))
+        combat_type = CombatType.from_objective_side(objective.side)
         return DetectionResult(
             fight_balance=balance,
             allies_count=len(winners),
             opponents_count=len(losers),
             confidence=confidence,
+            combat_type=combat_type,
             detail=(
                 f"OCR : {len(winners)} allié(s) contre {len(losers)} adversaire(s). "
+                f"{combat_type.label} : objectif chez les "
+                f"{'perdants' if objective.side == 'losers' else 'gagnants'}. "
                 f"Objectif exclu : {objective.name}."
             ),
         )
