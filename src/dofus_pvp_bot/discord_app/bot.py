@@ -20,8 +20,9 @@ from dofus_pvp_bot.discord_app.presentation import (
 )
 from dofus_pvp_bot.discord_app.review_images import prepare_review_images
 from dofus_pvp_bot.discord_app.views import ReviewView, StartSubmissionView
-from dofus_pvp_bot.domain.leaderboard import MonthPeriod
+from dofus_pvp_bot.domain.leaderboard import FortnightPeriod
 from dofus_pvp_bot.domain.models import (
+    CombatType,
     DetectionResult,
     Submission,
     SubmissionLane,
@@ -56,22 +57,33 @@ class DofusPvpBot(commands.Bot):
 
         @self.tree.command(
             name="classement",
-            description="Affiche le classement PvP mensuel.",
+            description="Affiche le classement PvP par quinzaine.",
         )
-        @app_commands.describe(mois="Mois au format AAAA-MM (mois courant par défaut)")
+        @app_commands.describe(
+            periode="Quinzaine au format AAAA-MM-1 ou AAAA-MM-2 (courante par défaut)",
+            categorie="Global par défaut ; sinon attaques ou défenses",
+        )
+        @app_commands.choices(
+            categorie=[
+                app_commands.Choice(name="Global", value="global"),
+                app_commands.Choice(name="Attaques", value="attack"),
+                app_commands.Choice(name="Défenses", value="defense"),
+            ]
+        )
         async def classement(
             interaction: discord.Interaction,
-            mois: str | None = None,
+            periode: str | None = None,
+            categorie: app_commands.Choice[str] | None = None,
         ) -> None:
-            await self._show_leaderboard(interaction, mois)
+            await self._show_leaderboard(interaction, periode, categorie)
 
-        @classement.autocomplete("mois")
-        async def classement_months(
+        @classement.autocomplete("periode")
+        async def classement_periods(
             interaction: discord.Interaction,
             current: str,
         ) -> list[app_commands.Choice[str]]:
             del interaction
-            return self._month_choices(current)
+            return self._period_choices(current)
 
     async def setup_hook(self) -> None:
         await self.service.repository.initialize()
@@ -102,8 +114,8 @@ class DofusPvpBot(commands.Bot):
             len(pending),
         )
         await self._sync_guild_commands()
-        if not self.close_monthly_leaderboards.is_running():
-            self.close_monthly_leaderboards.start()
+        if not self.close_fortnight_leaderboards.is_running():
+            self.close_fortnight_leaderboards.start()
 
     async def _sync_guild_commands(self) -> None:
         channel = await self.fetch_channel(self.settings.review_channel_id)
@@ -117,7 +129,8 @@ class DofusPvpBot(commands.Bot):
     async def _show_leaderboard(
         self,
         interaction: discord.Interaction,
-        month_value: str | None,
+        period_value: str | None,
+        category: app_commands.Choice[str] | None,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -130,11 +143,18 @@ class DofusPvpBot(commands.Bot):
         await interaction.response.defer(ephemeral=True)
         try:
             period = (
-                MonthPeriod.parse(month_value)
-                if month_value
-                else MonthPeriod.current(self.settings.leaderboard_timezone)
+                FortnightPeriod.parse(period_value)
+                if period_value
+                else FortnightPeriod.current(self.settings.leaderboard_timezone)
             )
-            leaderboard = await self.leaderboard_service.get(interaction.guild_id, period)
+            combat_type = (
+                None
+                if category is None or category.value == "global"
+                else CombatType(category.value)
+            )
+            leaderboard = await self.leaderboard_service.get(
+                interaction.guild_id, period, combat_type=combat_type
+            )
         except ValueError as exc:
             await interaction.followup.send(f"❌ {exc}", ephemeral=True)
             return
@@ -190,32 +210,32 @@ class DofusPvpBot(commands.Bot):
             return f"Utilisateur inconnu · ID {user_id}"
         return user.display_name
 
-    def _month_choices(self, current: str) -> list[app_commands.Choice[str]]:
-        period = MonthPeriod.current(self.settings.leaderboard_timezone)
+    def _period_choices(self, current: str) -> list[app_commands.Choice[str]]:
+        period = FortnightPeriod.current(self.settings.leaderboard_timezone)
         choices: list[app_commands.Choice[str]] = []
         search = current.casefold().strip()
-        for _ in range(18):
+        for _ in range(36):
             if not search or search in period.key or search in period.label.casefold():
                 choices.append(app_commands.Choice(name=period.label, value=period.key))
             period = period.previous()
         return choices[:25]
 
     @tasks.loop(minutes=5)
-    async def close_monthly_leaderboards(self) -> None:
+    async def close_fortnight_leaderboards(self) -> None:
         guild_ids = await self.service.repository.list_leaderboard_guild_ids()
         for guild_id in guild_ids:
-            await self.leaderboard_service.close_due_months(guild_id)
+            await self.leaderboard_service.close_due_periods(guild_id)
 
-    @close_monthly_leaderboards.error
-    async def close_monthly_leaderboards_error(self, error: BaseException) -> None:
+    @close_fortnight_leaderboards.error
+    async def close_fortnight_leaderboards_error(self, error: BaseException) -> None:
         LOGGER.exception("Échec de la clôture automatique des classements", exc_info=error)
 
-    @close_monthly_leaderboards.before_loop
-    async def before_close_monthly_leaderboards(self) -> None:
+    @close_fortnight_leaderboards.before_loop
+    async def before_close_fortnight_leaderboards(self) -> None:
         await self.wait_until_ready()
 
     async def close(self) -> None:
-        self.close_monthly_leaderboards.cancel()
+        self.close_fortnight_leaderboards.cancel()
         await super().close()
 
     async def on_ready(self) -> None:
@@ -301,9 +321,7 @@ class DofusPvpBot(commands.Bot):
                     f"**{submission.detected_allies_count} allié(s) contre "
                     f"{submission.detected_opponents_count} adversaire(s)** · "
                 )
-            analysis_text = (
-                f"Résultat détecté : {counts}**{submission.fight_balance.label}**."
-            )
+            analysis_text = f"Résultat détecté : {counts}**{submission.fight_balance.label}**."
         if submission.combat_type is not None:
             analysis_text += f" Sens du combat : **{submission.combat_type.label}**."
         else:
@@ -374,9 +392,7 @@ class DofusPvpBot(commands.Bot):
             for image in prepared_images
         ]
         points = (
-            self.service.calculate(submission)
-            if submission.fight_balance is not None
-            else None
+            self.service.calculate(submission) if submission.fight_balance is not None else None
         )
         submission.points = points
         review_embed = build_review_embed(submission)

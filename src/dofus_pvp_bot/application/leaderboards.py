@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from dofus_pvp_bot.domain.leaderboard import (
+    FortnightLeaderboard,
+    FortnightPeriod,
     LeaderboardEntry,
-    MonthlyLeaderboard,
-    MonthPeriod,
     assign_competition_ranks,
 )
+from dofus_pvp_bot.domain.models import CombatType
 from dofus_pvp_bot.storage.sqlite import SQLiteSubmissionRepository
 
 
@@ -28,15 +29,18 @@ class LeaderboardService:
     async def get(
         self,
         guild_id: int,
-        period: MonthPeriod,
+        period: FortnightPeriod,
         *,
         now: datetime | None = None,
-    ) -> MonthlyLeaderboard:
-        current = MonthPeriod.current(self.timezone, now)
+        combat_type: CombatType | None = None,
+    ) -> FortnightLeaderboard:
+        current = FortnightPeriod.current(self.timezone, now)
         if period > current:
-            raise LeaderboardError("Le classement d’un mois futur n’existe pas.")
+            raise LeaderboardError("Le classement d’une période future n’existe pas.")
 
-        snapshot = await self.repository.load_leaderboard_snapshot(guild_id, period.key)
+        snapshot = await self.repository.load_leaderboard_snapshot(
+            guild_id, period.key, combat_type
+        )
         if snapshot is not None:
             stored_entries, approved_count, closed_at = snapshot
             entries = tuple(
@@ -48,21 +52,22 @@ class LeaderboardService:
                 )
                 for user_id, points, count, rank in stored_entries
             )
-            return MonthlyLeaderboard(
+            return FortnightLeaderboard(
                 period=period,
                 entries=entries,
                 approved_submission_count=approved_count,
                 pending_submission_count=0,
                 finalized=True,
                 closed_at=closed_at,
+                combat_type=combat_type,
             )
 
         start_utc, end_utc = period.utc_bounds(self.timezone)
         scores, approved_count = await self.repository.aggregate_leaderboard(
-            guild_id, start_utc, end_utc
+            guild_id, start_utc, end_utc, combat_type
         )
         pending_count = await self.repository.count_pending_reviews(
-            guild_id, start_utc, end_utc
+            guild_id, start_utc, end_utc, combat_type
         )
         entries = assign_competition_ranks(scores)
 
@@ -73,11 +78,14 @@ class LeaderboardService:
                 timezone_name=self.timezone.key,
                 start_utc=start_utc,
                 end_utc=end_utc,
+                combat_type=combat_type,
             )
-            stored = await self.repository.load_leaderboard_snapshot(guild_id, period.key)
+            stored = await self.repository.load_leaderboard_snapshot(
+                guild_id, period.key, combat_type
+            )
             if stored is not None:
                 stored_entries, stored_count, closed_at = stored
-                return MonthlyLeaderboard(
+                return FortnightLeaderboard(
                     period=period,
                     entries=tuple(
                         LeaderboardEntry(
@@ -92,32 +100,37 @@ class LeaderboardService:
                     pending_submission_count=0,
                     finalized=True,
                     closed_at=closed_at,
+                    combat_type=combat_type,
                 )
 
-        return MonthlyLeaderboard(
+        return FortnightLeaderboard(
             period=period,
             entries=entries,
             approved_submission_count=approved_count,
             pending_submission_count=pending_count,
             finalized=False,
+            combat_type=combat_type,
         )
 
-    async def close_due_months(
+    async def close_due_periods(
         self,
         guild_id: int,
         *,
         now: datetime | None = None,
-    ) -> list[MonthlyLeaderboard]:
+    ) -> list[FortnightLeaderboard]:
         instant = now or datetime.now(UTC)
-        current = MonthPeriod.current(self.timezone, instant)
+        current = FortnightPeriod.current(self.timezone, instant)
         earliest = await self.repository.earliest_review_submission(guild_id)
         if earliest is None:
             return []
         earliest_instant = _parse_utc_timestamp(earliest)
-        period = MonthPeriod.current(self.timezone, earliest_instant)
-        results: list[MonthlyLeaderboard] = []
+        period = FortnightPeriod.current(self.timezone, earliest_instant)
+        results: list[FortnightLeaderboard] = []
         while period < current:
-            results.append(await self.get(guild_id, period, now=instant))
+            for combat_type in (None, CombatType.ATTACK, CombatType.DEFENSE):
+                results.append(
+                    await self.get(guild_id, period, now=instant, combat_type=combat_type)
+                )
             period = period.next()
         return results
 

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import discord
 
 from dofus_pvp_bot.application.submissions import SubmissionService
-from dofus_pvp_bot.domain.leaderboard import MonthlyLeaderboard
+from dofus_pvp_bot.domain.leaderboard import FortnightLeaderboard
 from dofus_pvp_bot.domain.models import Submission, SubmissionStatus
 
 
@@ -22,10 +22,7 @@ def _detection_text(submission: Submission) -> str:
     if submission.fight_balance is None:
         return "Effectifs à déterminer par le staff."
     text = submission.fight_balance.label
-    if (
-        submission.allies_count is not None
-        and submission.opponents_count is not None
-    ):
+    if submission.allies_count is not None and submission.opponents_count is not None:
         text += (
             f" · **{submission.allies_count}v{submission.opponents_count}** "
             "(hors percepteur/prisme)"
@@ -141,10 +138,7 @@ def build_review_embed(submission: Submission, *, final: bool = False) -> discor
     if submission.combat_type_corrected:
         combat_type_text += " · corrigé par le staff"
     embed.add_field(name="Sens du combat", value=combat_type_text, inline=False)
-    if (
-        submission.combat_type_corrected
-        and submission.detected_combat_type is not None
-    ):
+    if submission.combat_type_corrected and submission.detected_combat_type is not None:
         embed.add_field(
             name="Sens OCR initial",
             value=submission.detected_combat_type.label,
@@ -208,7 +202,7 @@ def build_review_embed(submission: Submission, *, final: bool = False) -> discor
 
 
 def build_leaderboard_embed(
-    leaderboard: MonthlyLeaderboard,
+    leaderboard: FortnightLeaderboard,
     display_names: Mapping[int, str],
 ) -> discord.Embed:
     if leaderboard.finalized:
@@ -218,7 +212,7 @@ def build_leaderboard_embed(
         colour = discord.Colour.orange()
         status = (
             "⏳ Clôture en attente de "
-            f"{leaderboard.pending_submission_count} soumission(s) du mois"
+            f"{leaderboard.pending_submission_count} soumission(s) de la période"
         )
     else:
         colour = discord.Colour.blue()
@@ -239,8 +233,9 @@ def build_leaderboard_embed(
             f"· {entry.submission_count} {combat_label}"
         )
 
+    category = leaderboard.combat_type.label.lower() if leaderboard.combat_type else "global"
     embed = discord.Embed(
-        title=f"Classement PvP · {leaderboard.period.label}",
+        title=f"Classement PvP {category} · {leaderboard.period.label}",
         description="\n".join(lines) if lines else "Aucun point validé pour cette période.",
         colour=colour,
     )

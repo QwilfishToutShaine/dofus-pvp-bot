@@ -134,6 +134,30 @@ class SQLiteSubmissionRepository:
                         REFERENCES leaderboard_months(guild_id, period_key)
                         ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS leaderboard_periods (
+                    guild_id INTEGER NOT NULL,
+                    period_key TEXT NOT NULL,
+                    combat_category TEXT NOT NULL,
+                    timezone TEXT NOT NULL,
+                    approved_submission_count INTEGER NOT NULL,
+                    closed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, period_key, combat_category)
+                );
+
+                CREATE TABLE IF NOT EXISTS leaderboard_period_entries (
+                    guild_id INTEGER NOT NULL,
+                    period_key TEXT NOT NULL,
+                    combat_category TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    total_points INTEGER NOT NULL,
+                    submission_count INTEGER NOT NULL,
+                    rank INTEGER NOT NULL,
+                    PRIMARY KEY (guild_id, period_key, combat_category, user_id),
+                    FOREIGN KEY (guild_id, period_key, combat_category)
+                        REFERENCES leaderboard_periods(guild_id, period_key, combat_category)
+                        ON DELETE CASCADE
+                );
                 """
             )
             self._migrate_legacy_schema(connection)
@@ -237,9 +261,7 @@ class SQLiteSubmissionRepository:
                 """
             )
         else:
-            connection.execute(
-                "UPDATE submissions SET multiplier = 1 WHERE multiplier IS NULL"
-            )
+            connection.execute("UPDATE submissions SET multiplier = 1 WHERE multiplier IS NULL")
         connection.execute(
             """
             UPDATE submissions
@@ -282,7 +304,8 @@ class SQLiteSubmissionRepository:
                     submission.combat_type.value if submission.combat_type else None,
                     (
                         submission.detected_combat_type.value
-                        if submission.detected_combat_type else None
+                        if submission.detected_combat_type
+                        else None
                     ),
                     int(submission.combat_type_corrected),
                     int(submission.combat_type_required),
@@ -355,6 +378,7 @@ class SQLiteSubmissionRepository:
         guild_id: int,
         start_utc: str,
         end_utc: str,
+        combat_type: CombatType | None = None,
     ) -> tuple[list[tuple[int, int, int]], int]:
         def operation(
             connection: sqlite3.Connection,
@@ -372,10 +396,17 @@ class SQLiteSubmissionRepository:
                     AND submission.total_points IS NOT NULL
                     AND submission.review_submitted_at >= ?
                     AND submission.review_submitted_at < ?
+                    AND (? IS NULL OR submission.combat_type = ?)
                 GROUP BY participant.user_id
                 ORDER BY total_points DESC, participant.user_id ASC
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchall()
             count_row = connection.execute(
                 """
@@ -383,8 +414,15 @@ class SQLiteSubmissionRepository:
                 FROM submissions
                 WHERE guild_id = ? AND status = 'approved' AND total_points IS NOT NULL
                     AND review_submitted_at >= ? AND review_submitted_at < ?
+                    AND (? IS NULL OR combat_type = ?)
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchone()
             scores = [
                 (int(row["user_id"]), int(row["total_points"]), int(row["submission_count"]))
@@ -400,6 +438,7 @@ class SQLiteSubmissionRepository:
         guild_id: int,
         start_utc: str,
         end_utc: str,
+        combat_type: CombatType | None = None,
     ) -> int:
         def operation(connection: sqlite3.Connection) -> int:
             row = connection.execute(
@@ -408,8 +447,15 @@ class SQLiteSubmissionRepository:
                 FROM submissions
                 WHERE guild_id = ? AND status = 'pending_review'
                     AND review_submitted_at >= ? AND review_submitted_at < ?
+                    AND (? IS NULL OR combat_type IS NULL OR combat_type = ?)
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchone()
             return int(row["pending_count"]) if row else 0
 
@@ -419,6 +465,7 @@ class SQLiteSubmissionRepository:
         self,
         guild_id: int,
         period_key: str,
+        combat_type: CombatType | None = None,
     ) -> tuple[list[tuple[int, int, int, int]], int, str] | None:
         def operation(
             connection: sqlite3.Connection,
@@ -426,21 +473,21 @@ class SQLiteSubmissionRepository:
             month = connection.execute(
                 """
                 SELECT approved_submission_count, closed_at
-                FROM leaderboard_months
-                WHERE guild_id = ? AND period_key = ?
+                FROM leaderboard_periods
+                WHERE guild_id = ? AND period_key = ? AND combat_category = ?
                 """,
-                (guild_id, period_key),
+                (guild_id, period_key, combat_type.value if combat_type else "global"),
             ).fetchone()
             if month is None:
                 return None
             rows = connection.execute(
                 """
                 SELECT user_id, total_points, submission_count, rank
-                FROM leaderboard_entries
-                WHERE guild_id = ? AND period_key = ?
+                FROM leaderboard_period_entries
+                WHERE guild_id = ? AND period_key = ? AND combat_category = ?
                 ORDER BY rank, user_id
                 """,
-                (guild_id, period_key),
+                (guild_id, period_key, combat_type.value if combat_type else "global"),
             ).fetchall()
             entries = [
                 (
@@ -463,14 +510,16 @@ class SQLiteSubmissionRepository:
         timezone_name: str,
         start_utc: str,
         end_utc: str,
+        combat_type: CombatType | None = None,
     ) -> bool:
         def operation(connection: sqlite3.Connection) -> bool:
+            category = combat_type.value if combat_type else "global"
             existing = connection.execute(
                 """
-                SELECT 1 FROM leaderboard_months
-                WHERE guild_id = ? AND period_key = ?
+                SELECT 1 FROM leaderboard_periods
+                WHERE guild_id = ? AND period_key = ? AND combat_category = ?
                 """,
-                (guild_id, period_key),
+                (guild_id, period_key, category),
             ).fetchone()
             if existing is not None:
                 return True
@@ -481,8 +530,15 @@ class SQLiteSubmissionRepository:
                 FROM submissions
                 WHERE guild_id = ? AND status = 'pending_review'
                     AND review_submitted_at >= ? AND review_submitted_at < ?
+                    AND (? IS NULL OR combat_type IS NULL OR combat_type = ?)
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchone()
             if pending is not None and int(pending["pending_count"]) > 0:
                 return False
@@ -500,10 +556,17 @@ class SQLiteSubmissionRepository:
                     AND submission.total_points IS NOT NULL
                     AND submission.review_submitted_at >= ?
                     AND submission.review_submitted_at < ?
+                    AND (? IS NULL OR submission.combat_type = ?)
                 GROUP BY participant.user_id
                 ORDER BY total_points DESC, participant.user_id ASC
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchall()
             count_row = connection.execute(
                 """
@@ -511,19 +574,27 @@ class SQLiteSubmissionRepository:
                 FROM submissions
                 WHERE guild_id = ? AND status = 'approved' AND total_points IS NOT NULL
                     AND review_submitted_at >= ? AND review_submitted_at < ?
+                    AND (? IS NULL OR combat_type = ?)
                 """,
-                (guild_id, start_utc, end_utc),
+                (
+                    guild_id,
+                    start_utc,
+                    end_utc,
+                    combat_type.value if combat_type else None,
+                    combat_type.value if combat_type else None,
+                ),
             ).fetchone()
             approved_submission_count = (
                 int(count_row["submission_count"]) if count_row is not None else 0
             )
             cursor = connection.execute(
                 """
-                INSERT OR IGNORE INTO leaderboard_months (
-                    guild_id, period_key, timezone, approved_submission_count
-                ) VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO leaderboard_periods (
+                    guild_id, period_key, combat_category, timezone,
+                    approved_submission_count
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (guild_id, period_key, timezone_name, approved_submission_count),
+                (guild_id, period_key, category, timezone_name, approved_submission_count),
             )
             if cursor.rowcount != 1:
                 return True
@@ -546,12 +617,13 @@ class SQLiteSubmissionRepository:
                 )
             connection.executemany(
                 """
-                INSERT INTO leaderboard_entries (
-                    guild_id, period_key, user_id, total_points, submission_count, rank
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO leaderboard_period_entries (
+                    guild_id, period_key, combat_category, user_id,
+                    total_points, submission_count, rank
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    (guild_id, period_key, user_id, points, count, rank)
+                    (guild_id, period_key, category, user_id, points, count, rank)
                     for user_id, points, count, rank in entries
                 ],
             )
@@ -594,13 +666,10 @@ class SQLiteSubmissionRepository:
             status=SubmissionStatus(row["status"]),
             prompt_message_id=row["prompt_message_id"],
             review_message_id=row["review_message_id"],
-            fight_balance=(
-                FightBalance(row["fight_balance"]) if row["fight_balance"] else None
-            ),
+            fight_balance=(FightBalance(row["fight_balance"]) if row["fight_balance"] else None),
             combat_type=CombatType(row["combat_type"]) if row["combat_type"] else None,
             detected_combat_type=(
-                CombatType(row["detected_combat_type"])
-                if row["detected_combat_type"] else None
+                CombatType(row["detected_combat_type"]) if row["detected_combat_type"] else None
             ),
             combat_type_corrected=bool(row["combat_type_corrected"]),
             combat_type_required=bool(row["combat_type_required"]),
@@ -650,7 +719,8 @@ class SQLiteSubmissionRepository:
                     submission.combat_type.value if submission.combat_type else None,
                     (
                         submission.detected_combat_type.value
-                        if submission.detected_combat_type else None
+                        if submission.detected_combat_type
+                        else None
                     ),
                     int(submission.combat_type_corrected),
                     int(submission.combat_type_required),

@@ -16,7 +16,7 @@ soumissions de points vérifiées par le staff.
    soumission, il doit préciser attaque ou défense si l’OCR n’a pas pu le faire.
 7. Les effectifs et le sens détectés par l’OCR et ceux finalement retenus sont conservés
    séparément dans SQLite, avec le barème et les statuts.
-8. Chaque membre peut consulter le classement mensuel avec `/classement`.
+8. Chaque membre peut consulter le classement par quinzaine avec `/classement`.
 
 Le clic sur **Attribuer les points** reste nécessaire : Discord ne permet pas d’ouvrir
 spontanément un formulaire éphémère depuis un simple dépôt de fichier.
@@ -39,23 +39,33 @@ spontanément un formulaire éphémère depuis un simple dépôt de fichier.
 Le barème se trouve dans [`config/scoring.json`](config/scoring.json). Une soumission conserve la
 version et le multiplicateur utilisés lors de son calcul.
 
-## Classement mensuel
+## Classement par quinzaine
 
-- `/classement` affiche le mois en cours, encore provisoire.
-- L’option `mois` permet de choisir un mois au format `AAAA-MM` parmi les dix-huit derniers mois.
+- `/classement` affiche la quinzaine en cours (provisoire), en vue globale par défaut.
+- Chaque mois est découpé en deux périodes : du 1er au 15 inclus, puis du 16 au dernier jour.
+- L’option facultative `periode` permet de choisir `AAAA-MM-1` ou `AAAA-MM-2` parmi les
+  trente-six dernières quinzaines (dix-huit mois environ).
+- L’option facultative `categorie` sélectionne `Global`, `Attaques` ou `Défenses` ;
+  elle s’applique aussi aux périodes passées.
 - Seules les soumissions validées par le staff sont additionnées.
+- Le classement global inclut tous les combats validés. Les classements spécialisés incluent
+  uniquement les combats enregistrés comme attaque ou défense. Les anciens combats dont le sens
+  est inconnu restent uniquement dans le global ; ils ne sont pas devinés a posteriori.
 - Chaque bénéficiaire reçoit la totalité des points de la soumission.
 - Le nombre de combats est affiché, mais ne départage pas les joueurs.
 - Les égalités suivent le classement de compétition : `1, 1, 3`.
 
-Une soumission appartient au mois où elle est **envoyée en vérification**, et non au mois où le
-staff clique sur **Valider**. Une validation du 1er octobre peut ainsi compter pour septembre si le
-joueur avait terminé sa soumission avant la fin du mois.
+Une soumission appartient à la quinzaine où elle est **envoyée en vérification**, et non à celle
+où le staff clique sur **Valider**. Une validation le 16 peut donc compter pour la première
+quinzaine si la soumission avait été envoyée au staff au plus tard le 15.
 
-Après le changement de mois, le bot attend que les soumissions déjà en vérification soient validées
-ou refusées, puis crée une copie définitive et immuable du classement. Cette vérification a lieu
-toutes les cinq minutes et au prochain démarrage du bot. Les brouillons jamais envoyés au staff ne
-bloquent pas la clôture.
+À chaque changement de quinzaine, le bot attend les validations ou refus nécessaires à chaque vue,
+puis fige séparément les trois classements. Une soumission encore en vérification dont le sens est
+inconnu empêche de clôturer les trois vues ; une attaque en attente ne bloque pas la vue défenses.
+La vérification a lieu toutes les cinq minutes et au prochain démarrage du bot. Les brouillons
+jamais envoyés au staff ne bloquent pas la clôture. Les anciennes archives mensuelles ne sont pas
+supprimées de SQLite, mais `/classement` affiche désormais les quinzaines recalculées depuis
+les soumissions enregistrées (sans reporter un classement mensuel figé sur l’une des deux périodes).
 
 ## Analyse automatique
 
